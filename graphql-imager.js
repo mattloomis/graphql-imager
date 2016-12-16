@@ -31,7 +31,6 @@ if(argv['html']) {
 	html += 'li { list-style-type: none; }\n';
 	
 	html += '.comment { color: gray; }\n';
-	html += '.comment-first { margin-top:10px; }\n';
 	
 	html += '.typeKeyword {	color:red; }\n';
 	html += '.enumKeyword {	color:magenta; }\n';
@@ -64,9 +63,8 @@ if(argv['html']) {
 				
 				if(field.comments) {
 					for(var commentIdx=0; commentIdx < field.comments.length; commentIdx++) {
-						html += '<li class="comment';
-						if(commentIdx==0) html += ' comment-first';
-						html += '">#'+field.comments[commentIdx].value+'</li>\n';
+						if(commentIdx==0) html += '<li>&nbsp;</li>';
+						html += '<li class="comment">#'+field.comments[commentIdx].value+'</li>\n';
 					}
 				}
 				
@@ -95,11 +93,9 @@ if(argv['html']) {
 			break;
 			
 		case 'CommentDefinition':
-			html += '<p><span class="comment';
 			
-			if(itemIdx>0 && parsed.definitions[itemIdx-1].kind!='CommentDefinition') html += ' comment-first';
-			
-			html += '">#'+item.value+'</span></p>\n';
+			if(itemIdx>0 && parsed.definitions[itemIdx-1].kind!='CommentDefinition') html += '<p>&nbsp;</p>';
+			html += '<p><span class="comment">#'+item.value+'</span></p>\n';
 			break;
 			
 		case 'EnumTypeDefinition':
