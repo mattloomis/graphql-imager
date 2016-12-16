@@ -6,7 +6,7 @@ var USAGE = "Expected GraphQL shorthand notation on STDIN. Usage: graphql-imager
 
 var argv = require('minimist')(
 	process.argv.slice(2),
-	{ boolean: ['html', 'png']
+	{ boolean: ['html', 'dot']
 	}
 );
 
@@ -76,15 +76,12 @@ if(argv['html']) {
 						if (argumentIdx > 0) html += ', ';
 						argument = field.arguments[argumentIdx];
 						html += argument.name.value;
-						html += ': ' + printVariableType(argument.type);
+						html += ': ' + printVariableType(argument.type, true);
 					}
 					html += '</i>)';
 				}
 				
-				
-				var type = field.type;
-				
-				html += ': ' + printVariableType(type);
+				html += ': ' + printVariableType(field.type, true);
 				
 				html += '</li>\n';
 			}
@@ -116,7 +113,7 @@ if(argv['html']) {
 			for(var typeIdx=0; typeIdx<item.types.length; typeIdx++) {
 				type = item.types[typeIdx];
 				if(typeIdx>0) html += ' | ';
-				html += printVariableType(type);
+				html += printVariableType(type, true);
 			}
 			
 			html += '</p>\n';
@@ -138,11 +135,153 @@ if(argv['html']) {
 	html += '</body>\n</html>';
 	
 	console.log(html);
+
+
+
+
+} else if(argv['dot']) {
+
+
+	var dot = 'digraph graphql { \n';
+	dot += '  node[shape=record];\n';
+	
+	var enums = [];
+	var scalars = [];
+	
+	for(var itemIdx=0; itemIdx<parsed.definitions.length; itemIdx++) {
+		var item = parsed.definitions[itemIdx];
+		
+		switch(item.kind) {
+		case 'ObjectTypeDefinition':
+			switch(item.name.value) {
+				case 'Query':
+				case 'Mutation':
+					continue;
+			}
+		case 'EnumTypeDefinition':
+		case 'ScalarTypeDefinition':
+		case 'UnionTypeDefinition':
+			break;
+		default:
+			continue;
+		}
+		
+		var typeName = 'type'+item.name.value;
+		
+		dot += '  '+typeName+' [label="{<'+typeName+'>';
+		
+		switch(item.kind) {
+		case 'ObjectTypeDefinition':
+			dot += 'type '+item.name.value;
+			
+			for(var fieldIdx=0; fieldIdx<item.fields.length; fieldIdx++) {
+				field = item.fields[fieldIdx];
+				dot += '|<'+field.name.value+'> '+field.name.value + ': ' + printVariableType(field.type);
+			}
+			
+			break;
+		case 'EnumTypeDefinition':
+			enums.push(item);
+			dot += 'enum '+item.name.value;
+			for(var valueIdx=0; valueIdx<item.values.length; valueIdx++) {
+				value = item.values[valueIdx];
+				dot +='|'+value.name.value;
+			}
+			break;
+		case 'UnionTypeDefinition':
+			dot += 'union '+item.name.value;
+			for(var typeIdx=0; typeIdx<item.types.length; typeIdx++) {
+				type = item.types[typeIdx];
+				dot += '|<'+type.name.value+'>'+type.name.value;
+			}
+			break;
+			
+		case 'ScalarTypeDefinition':
+			scalars.push(item);
+			dot += 'scalar '+item.name.value;
+			break;
+		}
+		
+		dot += '}"];\n';
+		
+	}
+	
+	
+	
+	for(var itemIdx=0; itemIdx<parsed.definitions.length; itemIdx++) {
+		var item = parsed.definitions[itemIdx];
+		
+		switch(item.kind) {
+		case 'ObjectTypeDefinition':
+			switch(item.name.value) {
+				case 'Query':
+				case 'Mutation':
+					continue;
+			}
+		case 'UnionTypeDefinition':
+			break;
+		default:
+			continue;
+		}
+		
+		var typeName = 'type'+item.name.value;
+		
+		switch(item.kind) {
+		case 'ObjectTypeDefinition':
+			
+			for(var fieldIdx=0; fieldIdx<item.fields.length; fieldIdx++) {
+				field = item.fields[fieldIdx];
+				//console.log(field);
+				var baseType = getBaseType(field.type);
+				if( ! isScalar(baseType) && ! isType(enums, baseType) && ! isType(scalars, baseType) ) {
+					dot += typeName+':'+field.name.value + ' -> ';
+					dot += 'type' + baseType.name.value + '\n';
+				}
+			}
+			
+			break;
+		case 'UnionTypeDefinition':
+			for(var typeIdx=0; typeIdx<item.types.length; typeIdx++) {
+				type = item.types[typeIdx];
+				dot += typeName+':'+type.name.value + ' -> ';
+				dot += 'type' + type.name.value + '\n';
+			}
+			break;
+		}
+		
+	}
+	
+	if(enums.length > 0) {
+		dot += "{ rank=sink";
+		for(var i=0; i<enums.length; i++) {
+			dot += "; type"+enums[i].name.value;
+		}
+		dot += "}\n";
+	}
+
+	if(scalars.length > 0) {
+		dot += "{ rank=min";
+		for(var i=0; i<scalars.length; i++) {
+			dot += "; type"+scalars[i].name.value;
+		}
+		dot += "}\n";
+	}
+
+	dot += "}"
+	
+	console.log(dot);
+
+
 }
 
-function printVariableType(type) {
 
-	var html = '';
+
+
+function printVariableType(type, html) {
+
+	var html = (typeof html !== 'undefined') ?  html : false;
+
+	var output = '';
 	var notNullBaseType = false;
 	if(type.kind == 'NonNullType') { 
 		notNullBaseType = true;
@@ -153,7 +292,7 @@ function printVariableType(type) {
 	var notNullListType = false;
 	if(type.kind == 'ListType') { 
 		listType = true;
-		html += '[';
+		output += '[';
 		type = type.type;
 		
 		if(type.kind == 'NonNullType') { 
@@ -164,33 +303,66 @@ function printVariableType(type) {
 	
 	
 	if(type.kind == 'NamedType') {
-		switch(type.name.value) {
-			case "String":
-			case "Boolean":
-			case "Int":
-			case "Float":
-				html += '<span class="scalarVariable">'+type.name.value+'</span>';
-				break;
-				
-			default:
-				html += '<span class="typeVariable">'+type.name.value+'</span>';
-				break;
-			
+		if(isScalar(type)) {
+			if(html) output += '<span class="scalarVariable">';
+		} else {
+			if(html) output += '<span class="typeVariable">';
 		}
+		
+		output += type.name.value;
+		if(html) output += '</span>';
 	}
 	
 	if(listType) {
 		if(notNullListType) {
-			html += '!';
+			output += '!';
 		}
-		html += ']';
+		output += ']';
 	}
 	
 	if(notNullBaseType) {
-		html += '!';
+		output += '!';
 	}
 	
-	return html;
+	return output;
+}
+
+function getBaseType(type) {
+	if(type.kind == 'NonNullType') { 
+		type = type.type;
+	}
+	if(type.kind == 'ListType') { 
+		type = type.type;
+		if(type.kind == 'NonNullType') { 
+			type = type.type;
+		}
+	}
+	
+	return type;
+}
+
+function isScalar(type) {
+	if(type.kind == 'NamedType') {
+		switch(type.name.value) {
+			case "ID":
+			case "String":
+			case "Boolean":
+			case "Int":
+			case "Float":
+				return true;
+		}
+	}
+	
+	return false;
+}
+
+function isType(list, type) {
+	for(var i=0; i<list.length; i++) {
+		if(list[i].name.value == type.name.value) {
+			return true;
+		}
+	}
+	return false;
 }
 
 
